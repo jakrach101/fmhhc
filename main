@@ -1,0 +1,637 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Home, 
+  Activity, 
+  Utensils, 
+  Users, 
+  Pill, 
+  Stethoscope, 
+  ShieldAlert, 
+  Heart, 
+  Ambulance, 
+  ChevronDown, 
+  ChevronUp,
+  CheckCircle2,
+  Copy,
+  Wand2,
+  AlertTriangle,
+  Check,
+  FileText,
+  Eraser,
+  Thermometer,
+  FileCheck,
+  Hospital,
+  Flower2,
+  Layers,
+  Lightbulb,
+  Mic,
+  MicOff,
+  MapPin,
+  Save,
+  Loader2
+} from 'lucide-react';
+
+// --- Types & Interfaces ---
+
+type IndicationType = 'acute_chronic' | 'assessment' | 'post_hosp' | 'palliative';
+
+const INDICATIONS: { id: IndicationType; label: string; icon: any; color: string }[] = [
+  { id: 'acute_chronic', label: 'Acute/Chronic Illness', icon: Thermometer, color: 'blue' },
+  { id: 'assessment', label: 'Assessment (LTC/Disability)', icon: FileCheck, color: 'indigo' },
+  { id: 'post_hosp', label: 'Post Hospitalization', icon: Hospital, color: 'orange' },
+  { id: 'palliative', label: 'Palliative Care', icon: Flower2, color: 'pink' },
+];
+
+const INHOMESSS_SECTIONS = [
+  { id: 'I', title: 'I - Immobility', subtitle: 'การเคลื่อนไหว / กิจวัตรประจำวัน', icon: Activity },
+  { id: 'N', title: 'N - Nutrition', subtitle: 'โภชนาการ / การรับประทานอาหาร', icon: Utensils },
+  { id: 'H', title: 'H - Housing', subtitle: 'สภาพบ้าน / สิ่งแวดล้อม', icon: Home },
+  { id: 'O', title: 'O - Other people', subtitle: 'ผู้ดูแล / สังคมรอบข้าง', icon: Users },
+  { id: 'M', title: 'M - Medication', subtitle: 'การใช้ยา / ความร่วมมือ', icon: Pill },
+  { id: 'E', title: 'E - Examination', subtitle: 'การตรวจร่างกายเบื้องต้น', icon: Stethoscope },
+  { id: 'S1', title: 'S - Safety', subtitle: 'ความปลอดภัย / ความเสี่ยงหกล้ม', icon: ShieldAlert },
+  { id: 'S2', title: 'S - Spiritual health', subtitle: 'จิตวิญญาณ / ความเชื่อ / ACP', icon: Heart },
+  { id: 'S3', title: 'S - Services', subtitle: 'บริการสาธารณสุข / สิทธิการรักษา', icon: Ambulance },
+];
+
+interface SmartTag {
+  label: string;
+  type: 'good' | 'bad' | 'neutral'; 
+  category: string; 
+  indications?: IndicationType[]; 
+  group?: string; 
+  triggers?: { targetSection: string; targetTag: string; reason: string }[]; 
+  riskScore?: number; 
+}
+
+// Intelligent Options Database (Enhanced)
+const SMART_OPTIONS: Record<string, SmartTag[]> = {
+  I: [
+    { label: 'เดินได้เอง (Independent)', type: 'good', category: 'Status', group: 'mobility' },
+    { label: 'ใช้อุปกรณ์ช่วยเดิน (Walker/Cane)', type: 'neutral', category: 'Status', group: 'mobility' },
+    { 
+      label: 'ติดเตียง (Bed bound)', 
+      type: 'bad', 
+      category: 'Status', 
+      group: 'mobility',
+      triggers: [
+        { targetSection: 'S1', targetTag: 'แผลกดทับ (Pressure Sore)', reason: 'Check Skin Integrity' },
+        { targetSection: 'E', targetTag: 'ข้อยึดติด (Contracture)', reason: 'Check ROM' }
+      ],
+      riskScore: 3
+    },
+    { label: 'ลุกนั่งได้บ้าง (Bed ridden)', type: 'neutral', category: 'Status', group: 'mobility' },
+    { label: 'ADL ลดลงจากเดิม (Decline)', type: 'bad', category: 'Risk', riskScore: 2 },
+    { label: 'Pain limiting movement', type: 'bad', category: 'Issue' },
+  ],
+  N: [
+    { label: 'ทานได้ดี (Adequate)', type: 'good', category: 'Status', group: 'intake' },
+    { label: 'เบื่ออาหาร (Poor appetite)', type: 'bad', category: 'Issue', group: 'intake', triggers: [{ targetSection: 'S2', targetTag: 'ซึมเศร้า (Depressed)', reason: 'Screen for depression' }] },
+    { label: 'น้ำหนักลด (Weight loss)', type: 'bad', category: 'Issue', riskScore: 2 },
+    { label: 'กลืนลำบาก (Dysphagia)', type: 'bad', category: 'Issue', triggers: [{ targetSection: 'E', targetTag: 'ปอดอักเสบ (Pneumonia signs)', reason: 'Risk of Aspiration' }] },
+    { label: 'On NG Tube', type: 'neutral', category: 'Support', group: 'route' },
+    { label: 'On Gastrostomy', type: 'neutral', category: 'Support', group: 'route' },
+  ],
+  H: [
+    { label: 'สภาพแวดล้อมเหมาะสม', type: 'good', category: 'Status' },
+    { label: 'บ้านชั้นเดียว/นอนชั้นล่าง', type: 'good', category: 'Access' },
+    { label: 'บ้านรก/สกปรก (Hygiene issue)', type: 'bad', category: 'Risk', riskScore: 1 },
+    { label: 'ทางเดินแคบ/มีสิ่งกีดขวาง', type: 'bad', category: 'Fall Risk', triggers: [{ targetSection: 'S1', targetTag: 'เสี่ยงหกล้มสูง (High Fall Risk)', reason: 'Environment hazard' }] },
+    { label: 'อากาศถ่ายเทไม่ดี', type: 'bad', category: 'Environment' },
+  ],
+  O: [
+    { label: 'ผู้ดูแลหลักเข้มแข็ง (Strong CG)', type: 'good', category: 'Caregiver' },
+    { label: 'มีผู้ดูแลผลัดเวร', type: 'good', category: 'Caregiver' },
+    { label: 'ผู้ดูแลเหนื่อยล้า (CG Burnout)', type: 'bad', category: 'Issue', riskScore: 2, triggers: [{ targetSection: 'S3', targetTag: 'ประสานนักสังคมสงเคราะห์', reason: 'Social Support needed' }] },
+    { label: 'อยู่คนเดียว (Living Alone)', type: 'bad', category: 'Issue', riskScore: 2 },
+    { label: 'ผู้ดูแลมีปัญหาสุขภาพ', type: 'bad', category: 'Issue' },
+  ],
+  M: [
+    { label: 'Adherence ดี (กินยาครบ)', type: 'good', category: 'Compliance', group: 'compliance' },
+    { label: 'ขาดยา/กินไม่ครบ (Non-adherence)', type: 'bad', category: 'Compliance', group: 'compliance', riskScore: 2 },
+    { label: 'จัดยาเอง (Self)', type: 'good', category: 'Management', group: 'management' },
+    { label: 'ผู้ดูแลจัดยาให้', type: 'neutral', category: 'Management', group: 'management' },
+    { label: 'Polypharmacy (>5 ตัว)', type: 'bad', category: 'Risk', riskScore: 1 },
+    { label: 'ยาเหลือ/หมดอายุ', type: 'bad', category: 'Issue' },
+  ],
+  E: [
+    { label: 'V/S Stable', type: 'good', category: 'General' },
+    { label: 'BP High (>140/90)', type: 'bad', category: 'Vitals', riskScore: 1 },
+    { label: 'Fever (>37.5)', type: 'bad', category: 'Vitals', riskScore: 2 },
+    { label: 'แผลกดทับ (Pressure Sore)', type: 'bad', category: 'Skin', riskScore: 3 },
+    { label: 'แผลแห้งดี', type: 'good', category: 'Skin', group: 'wound' },
+    { label: 'แผลติดเชื้อ/แฉะ', type: 'bad', category: 'Skin', group: 'wound', riskScore: 2 },
+    { label: 'ข้อยึดติด (Contracture)', type: 'bad', category: 'MSK' },
+    { label: 'บวม (Edema)', type: 'bad', category: 'General' },
+    { label: 'ปอดอักเสบ (Pneumonia signs)', type: 'bad', category: 'Chest', riskScore: 3 },
+  ],
+  S1: [
+    { label: 'ไม่เสี่ยงหกล้ม', type: 'good', category: 'Fall', group: 'fall' },
+    { label: 'เสี่ยงหกล้มสูง (High Fall Risk)', type: 'bad', category: 'Fall', group: 'fall', riskScore: 2 },
+    { label: 'ไม่มีราวจับในห้องน้ำ', type: 'bad', category: 'Env' },
+    { label: 'พื้นลื่น/ต่างระดับ', type: 'bad', category: 'Env' },
+  ],
+  S2: [
+    { label: 'สภาพจิตใจดี/ยอมรับได้', type: 'good', category: 'Mood' },
+    { label: 'ซึมเศร้า (Depressed)', type: 'bad', category: 'Mood', riskScore: 2 },
+    { label: 'วิตกกังวล (Anxiety)', type: 'bad', category: 'Mood' },
+    { label: 'ปฏิเสธการใส่ท่อ (No ET)', type: 'neutral', category: 'ACP' },
+    { label: 'ต้องการ CPR', type: 'neutral', category: 'ACP' },
+  ],
+  S3: [
+    { label: 'สิทธิการรักษาพร้อม', type: 'good', category: 'Service' },
+    { label: 'นัดคลินิกแล้ว', type: 'good', category: 'Plan' },
+    { label: 'ต้องการเตียง/รถเข็น', type: 'bad', category: 'Needs' },
+    { label: 'ต้องการผ้าอ้อม/นม', type: 'bad', category: 'Needs' },
+    { label: 'ประสานนักสังคมสงเคราะห์', type: 'neutral', category: 'Referral' },
+  ]
+};
+
+// --- Speech Recognition Hook ---
+const useSpeechRecognition = () => {
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'th-TH'; // Thai Language
+
+      recognitionRef.current.onresult = (event: any) => {
+        const text = event.results[0][0].transcript;
+        setTranscript(text);
+        // setIsListening(false); // Let onend handle cleanup
+      };
+
+      recognitionRef.current.onerror = (event: any) => {
+        if (event.error === 'aborted' || event.error === 'no-speech') {
+            setIsListening(false);
+            return; 
+        }
+        console.error("Speech Error", event.error);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+  }, []);
+
+  const startListening = () => {
+    if (recognitionRef.current && !isListening) {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (e) {
+        console.log("Speech start ignored");
+      }
+    } else if (!recognitionRef.current) {
+      alert("Browser does not support speech recognition.");
+    }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current && isListening) {
+        try { recognitionRef.current.stop(); } catch(e) {}
+    }
+  };
+
+  return { isListening, transcript, startListening, stopListening, setTranscript };
+};
+
+const App = () => {
+  // --- State ---
+  const [selectedIndications, setSelectedIndications] = useState<IndicationType[]>([]);
+  
+  const [patientInfo, setPatientInfo] = useState({
+    name: '',
+    hn: '',
+    visitDate: new Date().toISOString().split('T')[0],
+    location: '',
+  });
+  const [isLocating, setIsLocating] = useState(false);
+
+  // Context Data
+  const [contextData, setContextData] = useState<any>({});
+
+  const [formData, setFormData] = useState({
+    I: { text: '', tags: [] as string[] },
+    N: { text: '', tags: [] as string[] },
+    H: { text: '', tags: [] as string[] },
+    O: { text: '', tags: [] as string[] },
+    M: { text: '', tags: [] as string[] },
+    E: { text: '', tags: [] as string[] },
+    S1: { text: '', tags: [] as string[] },
+    S2: { text: '', tags: [] as string[] },
+    S3: { text: '', tags: [] as string[] },
+  });
+
+  const [activeSuggestions, setActiveSuggestions] = useState<{targetSection: string, targetTag: string, reason: string}[]>([]);
+  const [expandedSection, setExpandedSection] = useState<string | null>('I');
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
+  const [showPreview, setShowPreview] = useState(true); 
+  const [manualEditMode, setManualEditMode] = useState(false);
+  const [manualNoteContent, setManualNoteContent] = useState('');
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+
+  // Speech Hook
+  const { isListening, transcript, startListening, stopListening, setTranscript } = useSpeechRecognition();
+  const [activeSpeechSection, setActiveSpeechSection] = useState<string | null>(null);
+
+  // --- Effects ---
+  
+  // Auto-Load from LocalStorage
+  useEffect(() => {
+    const savedData = localStorage.getItem('fammed_visit_draft');
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        setPatientInfo(parsed.patientInfo || { name: '', hn: '', visitDate: new Date().toISOString().split('T')[0], location: '' });
+        setFormData(parsed.formData || {
+            I: { text: '', tags: [] }, N: { text: '', tags: [] }, H: { text: '', tags: [] },
+            O: { text: '', tags: [] }, M: { text: '', tags: [] }, E: { text: '', tags: [] },
+            S1: { text: '', tags: [] }, S2: { text: '', tags: [] }, S3: { text: '', tags: [] }
+        });
+        setSelectedIndications(parsed.selectedIndications || []);
+        setContextData(parsed.contextData || {});
+        setLastSaved('Loaded from Draft');
+      } catch (e) {
+        console.error("Failed to load draft", e);
+      }
+    }
+  }, []);
+
+  // Auto-Save
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const dataToSave = {
+        patientInfo,
+        formData,
+        selectedIndications,
+        contextData,
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('fammed_visit_draft', JSON.stringify(dataToSave));
+      setLastSaved(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+    }, 2000); 
+
+    return () => clearTimeout(timeoutId);
+  }, [patientInfo, formData, selectedIndications, contextData]);
+
+  // Speech Transcript
+  useEffect(() => {
+    if (transcript && activeSpeechSection) {
+      const currentText = formData[activeSpeechSection as keyof typeof formData].text;
+      const newText = currentText ? currentText + ' ' + transcript : transcript;
+      handleTextChange(activeSpeechSection, newText);
+      setTranscript('');
+      setActiveSpeechSection(null);
+    }
+  }, [transcript, activeSpeechSection]);
+
+  // --- Intelligence Functions ---
+
+  const findTagObject = (sectionId: string, label: string) => {
+    return SMART_OPTIONS[sectionId]?.find(t => t.label === label);
+  };
+
+  const handleSmartToggle = (sectionId: string, tagLabel: string) => {
+    const tagObj = findTagObject(sectionId, tagLabel);
+    if (!tagObj) return;
+
+    setFormData(prev => {
+      const currentTags = prev[sectionId as keyof typeof prev].tags;
+      const isCurrentlySelected = currentTags.includes(tagLabel);
+      let newTags = [...currentTags];
+
+      if (isCurrentlySelected) {
+        newTags = newTags.filter(t => t !== tagLabel);
+        if (tagObj.triggers) {
+            const triggersToRemove = tagObj.triggers.map(t => t.targetTag);
+            setActiveSuggestions(curr => curr.filter(s => !triggersToRemove.includes(s.targetTag)));
+        }
+      } else {
+        if (tagObj.group) {
+          const groupTags = SMART_OPTIONS[sectionId]
+            .filter(t => t.group === tagObj.group && t.label !== tagLabel)
+            .map(t => t.label);
+          newTags = newTags.filter(t => !groupTags.includes(t));
+        }
+        newTags.push(tagLabel);
+        if (tagObj.triggers) {
+           setActiveSuggestions(curr => {
+               const newSuggs = tagObj.triggers!.filter(t => !curr.some(c => c.targetTag === t.targetTag));
+               return [...curr, ...newSuggs];
+           });
+        }
+      }
+      return { ...prev, [sectionId]: { ...prev[sectionId as keyof typeof prev], tags: newTags } };
+    });
+    setManualEditMode(false);
+  };
+
+  const acceptSuggestion = (sugg: {targetSection: string, targetTag: string}) => {
+      handleSmartToggle(sugg.targetSection, sugg.targetTag);
+      setActiveSuggestions(prev => prev.filter(s => s.targetTag !== sugg.targetTag));
+  };
+
+  const calculateRiskImpression = () => {
+      let totalScore = 0;
+      let riskFactors: string[] = [];
+      INHOMESSS_SECTIONS.forEach(sec => {
+          const tags = formData[sec.id as keyof typeof formData].tags;
+          tags.forEach(tagLabel => {
+              const tagObj = findTagObject(sec.id, tagLabel);
+              if (tagObj?.riskScore) { totalScore += tagObj.riskScore; riskFactors.push(tagLabel); }
+          });
+      });
+      if (totalScore === 0) return "Stable / Low Risk";
+      if (totalScore < 3) return "Moderate Risk - Need Monitoring";
+      return `HIGH RISK (Score: ${totalScore}) - Factors: ${riskFactors.slice(0, 3).join(', ')}...`;
+  };
+
+  // --- Standard Handlers ---
+
+  const toggleIndication = (id: IndicationType) => {
+    setSelectedIndications(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const setQuickNormal = (sectionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const goodTags = SMART_OPTIONS[sectionId].filter(t => t.type === 'good').map(t => t.label);
+    setFormData(prev => ({ ...prev, [sectionId]: { ...prev[sectionId as keyof typeof prev], tags: goodTags } }));
+    const sectionBadTags = SMART_OPTIONS[sectionId].filter(t => t.type === 'bad').map(t => t.label);
+    setActiveSuggestions(prev => prev.filter(s => !sectionBadTags.includes(s.targetTag)));
+    setManualEditMode(false);
+  };
+
+  const handleTextChange = (sectionId: string, value: string) => {
+    setFormData(prev => ({ ...prev, [sectionId]: { ...prev[sectionId as keyof typeof prev], text: value } }));
+    setManualEditMode(false);
+  };
+
+  const getGeoLocation = () => {
+    if (!navigator.geolocation) {
+        alert('Geolocation not supported by your browser');
+        return;
+    }
+
+    setIsLocating(true);
+    
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            const link = `https://maps.google.com/?q=${position.coords.latitude},${position.coords.longitude}`;
+            setPatientInfo(prev => ({...prev, location: link}));
+            setIsLocating(false);
+        }, 
+        (error) => {
+            setIsLocating(false);
+            let msg = 'Unable to retrieve location.';
+            if (error.code === 1) msg = 'Permission denied. Please allow location access.';
+            else if (error.code === 2) msg = 'Position unavailable. GPS signal weak.';
+            else if (error.code === 3) msg = 'Timeout. Please try again.';
+            alert(msg);
+        },
+        { 
+            enableHighAccuracy: true, 
+            timeout: 10000, 
+            maximumAge: 0 
+        }
+    );
+  };
+
+  const toggleSpeech = (sectionId: string) => {
+    if (isListening && activeSpeechSection === sectionId) {
+        stopListening();
+        setActiveSpeechSection(null);
+    } else {
+        if (isListening) stopListening();
+        setActiveSpeechSection(sectionId);
+        setTimeout(() => startListening(), 100);
+    }
+  };
+
+  // --- Note Generation ---
+  const generateNote = () => {
+    const labels = selectedIndications.map(id => INDICATIONS.find(i => i.id === id)?.label).join(' + ');
+    let note = `HOME VISIT NOTE${labels ? `: ${labels.toUpperCase()}` : ''}\n`;
+    note += `Patient: ${patientInfo.name} (HN: ${patientInfo.hn}) Date: ${patientInfo.visitDate}\n`;
+    if (patientInfo.location) note += `Location: ${patientInfo.location}\n`;
+    note += `----------------------------------------\n`;
+    note += `IMPRESSION: ${calculateRiskImpression()}\n`;
+    note += `----------------------------------------\n`;
+    note += `INHOMESSS ASSESSMENT:\n`;
+    INHOMESSS_SECTIONS.forEach(section => {
+      const data = formData[section.id as keyof typeof formData];
+      if (data.tags.length > 0 || data.text.trim().length > 0) {
+        note += `${section.title}:\n`;
+        if (data.tags.length > 0) note += `   - Findings: ${data.tags.join(', ')}\n`;
+        if (data.text.trim().length > 0) note += `   - Note: ${data.text}\n`;
+      }
+    });
+    note += `----------------------------------------\n`;
+    note += `PLAN:\n- \n`;
+    return note;
+  };
+
+  useEffect(() => {
+      if (!manualEditMode) setManualNoteContent(generateNote());
+  }, [formData, patientInfo, contextData, selectedIndications, manualEditMode]);
+
+  const handleCopy = () => {
+    const noteToCopy = manualEditMode ? manualNoteContent : generateNote();
+    const textArea = document.createElement("textarea");
+    textArea.value = noteToCopy;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try { document.execCommand('copy'); setCopyStatus('copied'); setTimeout(() => setCopyStatus('idle'), 2000); } catch (err) {}
+    document.body.removeChild(textArea);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-36">
+      {/* Header */}
+      <header className="bg-teal-700 text-white p-4 shadow-md sticky top-0 z-20">
+        <div className="flex justify-between items-center max-w-3xl mx-auto">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-6 h-6 text-yellow-300" />
+            <h1 className="text-lg font-bold">FamMed AI Visit</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {lastSaved && <span className="text-[10px] text-teal-200 flex items-center gap-1"><Save className="w-3 h-3"/> Saved {lastSaved}</span>}
+            <div className="text-xs bg-teal-800 px-2 py-1 rounded border border-teal-600">v3.2 Pro</div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto p-4 space-y-4">
+        {/* Indications */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {INDICATIONS.map((ind) => {
+                const Icon = ind.icon;
+                const isActive = selectedIndications.includes(ind.id);
+                return (
+                    <button
+                        key={ind.id}
+                        onClick={() => toggleIndication(ind.id)}
+                        className={`relative flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-200 ${
+                            isActive ? `bg-${ind.color}-50 border-${ind.color}-500 ring-1 ring-${ind.color}-500` : 'bg-white border-slate-200'
+                        }`}
+                    >
+                        {isActive && <div className={`absolute top-1 right-1 w-4 h-4 rounded-full bg-${ind.color}-500 flex items-center justify-center`}><Check className="w-3 h-3 text-white" /></div>}
+                        <Icon className={`w-6 h-6 mb-1 ${isActive ? `text-${ind.color}-600` : 'text-slate-400'}`} />
+                        <span className={`text-[10px] font-bold text-center leading-tight ${isActive ? `text-${ind.color}-700` : ''}`}>{ind.label}</span>
+                    </button>
+                );
+            })}
+        </div>
+
+        {/* Suggestions */}
+        {activeSuggestions.length > 0 && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 animate-in fade-in slide-in-from-top-2 shadow-sm">
+                <div className="flex items-center gap-2 mb-2 text-indigo-800 font-bold text-xs uppercase tracking-wider">
+                    <Wand2 className="w-4 h-4" /> AI Recommendations
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {activeSuggestions.map((sugg, idx) => (
+                        <div key={idx} className="flex items-center bg-white border border-indigo-100 rounded-lg p-2 shadow-sm pr-3">
+                            <div className="text-xs mr-2">
+                                <span className="block font-semibold text-slate-700">{sugg.targetTag}</span>
+                                <span className="text-[10px] text-slate-500">Reason: {sugg.reason}</span>
+                            </div>
+                            <button onClick={() => acceptSuggestion(sugg)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 p-1.5 rounded-full transition-colors"><Check className="w-3 h-3" /></button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
+
+        {/* Patient Info */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+             <div className="grid grid-cols-1 gap-3">
+                <input type="text" name="name" placeholder="ชื่อ-นามสกุล" value={patientInfo.name} onChange={(e) => setPatientInfo({...patientInfo, name: e.target.value})} className="w-full p-2 border border-slate-300 rounded text-sm"/>
+                <div className="flex gap-3">
+                    <input type="text" name="hn" placeholder="HN" value={patientInfo.hn} onChange={(e) => setPatientInfo({...patientInfo, hn: e.target.value})} className="w-1/2 p-2 border border-slate-300 rounded text-sm"/>
+                    <input type="date" name="visitDate" value={patientInfo.visitDate} onChange={(e) => setPatientInfo({...patientInfo, visitDate: e.target.value})} className="w-1/2 p-2 border border-slate-300 rounded text-sm"/>
+                </div>
+                {/* Geolocation Button */}
+                <button 
+                    onClick={getGeoLocation} 
+                    disabled={isLocating}
+                    className="flex items-center justify-center gap-2 text-xs bg-slate-100 text-slate-600 py-2 rounded border border-slate-200 hover:bg-slate-200 disabled:opacity-70"
+                >
+                    {isLocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />} 
+                    {isLocating ? 'Locating...' : (patientInfo.location ? 'Update Location (Saved)' : 'Get Current GPS Location')}
+                </button>
+             </div>
+        </div>
+
+        {/* INHOMESSS Form */}
+        <div className="space-y-3">
+          {INHOMESSS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isExpanded = expandedSection === section.id;
+            const currentData = formData[section.id as keyof typeof formData];
+            const hasRisk = currentData.tags.some(tLabel => findTagObject(section.id, tLabel)?.type === 'bad');
+
+            return (
+              <div key={section.id} className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-all duration-200 ${hasRisk ? 'border-red-300 ring-1 ring-red-100' : 'border-slate-200'}`}>
+                <div onClick={() => setExpandedSection(isExpanded ? null : section.id)} className={`w-full flex items-center justify-between p-4 cursor-pointer ${isExpanded ? 'bg-slate-50' : 'bg-white'}`}>
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className={`flex-shrink-0 p-2 rounded-lg ${hasRisk ? 'bg-red-100 text-red-600' : (currentData.tags.length > 0 ? 'bg-teal-100 text-teal-700' : 'bg-slate-100 text-slate-500')}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="text-left min-w-0">
+                      <div className="font-bold text-slate-800 truncate flex items-center gap-2">
+                        {section.title}
+                        {hasRisk && <AlertTriangle className="w-4 h-4 text-red-500" />}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">{section.subtitle}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {isExpanded && (
+                        <button onClick={(e) => setQuickNormal(section.id, e)} className="text-xs flex items-center gap-1 bg-green-50 text-green-700 border border-green-200 px-2 py-1.5 rounded hover:bg-green-100 mr-1">
+                            <Wand2 className="w-3 h-3" /> ปกติ
+                        </button>
+                    )}
+                    {currentData.tags.length > 0 && !isExpanded && <span className={`text-xs px-2 py-1 rounded-full font-medium ${hasRisk ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{currentData.tags.length}</span>}
+                    {isExpanded ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="p-4 pt-0 bg-slate-50 border-t border-slate-100">
+                    <div className="flex flex-wrap gap-2 mt-3 mb-4">
+                        {SMART_OPTIONS[section.id]?.map(tag => {
+                             const isSelected = currentData.tags.includes(tag.label);
+                             let baseClass = "bg-white text-slate-600 border-slate-200";
+                             if (isSelected) {
+                                 if (tag.type === 'good') baseClass = "bg-green-100 text-green-800 border-green-500 ring-1 ring-green-200";
+                                 else if (tag.type === 'bad') baseClass = "bg-red-100 text-red-800 border-red-500 ring-1 ring-red-200";
+                                 else baseClass = "bg-slate-200 text-slate-800 border-slate-400 ring-1 ring-slate-300";
+                             }
+                             return (
+                                <button key={tag.label} onClick={() => handleSmartToggle(section.id, tag.label)} className={`text-xs px-3 py-2 rounded-lg border shadow-sm transition-all text-left ${baseClass}`}>
+                                    {tag.label}
+                                </button>
+                             );
+                        })}
+                    </div>
+                    
+                    <div className="relative">
+                        <textarea 
+                            value={currentData.text} 
+                            onChange={(e) => handleTextChange(section.id, e.target.value)} 
+                            placeholder={`เพิ่มเติม... (พิมพ์หรือกดไมค์พูด)`} 
+                            className="w-full p-3 pr-10 border border-slate-300 rounded-lg focus:outline-none text-sm bg-white h-24"
+                        />
+                        <button 
+                            onClick={() => toggleSpeech(section.id)}
+                            className={`absolute bottom-2 right-2 p-2 rounded-full transition-colors ${isListening && activeSpeechSection === section.id ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                            {isListening && activeSpeechSection === section.id ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Preview */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-300 overflow-hidden mt-6 mb-4">
+             <div className="bg-slate-100 p-3 flex justify-between items-center cursor-pointer border-b border-slate-200" onClick={() => setShowPreview(!showPreview)}>
+                <div className="flex items-center gap-2 font-semibold text-slate-700"><FileText className="w-5 h-5 text-teal-600" /> Note Preview</div>
+                {showPreview ? <ChevronUp className="w-5 h-5 text-slate-500" /> : <ChevronDown className="w-5 h-5 text-slate-500" />}
+             </div>
+             {showPreview && (
+                 <textarea value={manualEditMode ? manualNoteContent : generateNote()} onChange={(e) => {setManualEditMode(true); setManualNoteContent(e.target.value);}} className={`w-full h-64 p-4 font-mono text-sm text-slate-700 focus:outline-none resize-none bg-slate-50 ${manualEditMode ? 'border-l-4 border-orange-400' : ''}`}/>
+             )}
+        </div>
+      </main>
+
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-30">
+        <div className="max-w-3xl mx-auto flex gap-3">
+            <button onClick={() => { if(window.confirm('Reset?')) { 
+                localStorage.removeItem('fammed_visit_draft'); 
+                window.location.reload(); 
+            } }} className="flex-none px-4 py-3 rounded-lg border border-red-200 text-red-600 bg-red-50 font-medium hover:bg-red-100 flex items-center justify-center gap-2">
+                <Eraser className="w-4 h-4" /> <span className="hidden sm:inline">ล้างค่า</span>
+            </button>
+            <button onClick={handleCopy} className={`flex-1 flex items-center justify-center gap-2 font-bold py-3 px-6 rounded-lg text-white transition-all shadow-lg ${copyStatus === 'copied' ? 'bg-green-600' : 'bg-teal-600 hover:bg-teal-700'}`}>
+                {copyStatus === 'copied' ? <><CheckCircle2 className="w-5 h-5" /> Copied!</> : <><Copy className="w-5 h-5" /> Copy Note</>}
+            </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
